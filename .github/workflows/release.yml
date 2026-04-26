@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   goreleaser:
@@ -22,15 +21,6 @@ jobs:
           go-version: "1.23"
           cache: true
 
-      - name: Import GPG key (optional)
-        if: env.GPG_PRIVATE_KEY != ''
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -39,31 +29,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ secrets.GPG_FINGERPRINT }}
-
-  publish-installers:
-    name: Publish install.sh / install.ps1 to parel.cloud
-    needs: goreleaser
-    runs-on: ubuntu-latest
-    # Skipped if cross-repo PAT secret is not configured.
-    if: ${{ secrets.LANDING_DEPLOY_TOKEN != '' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Publish to parel-cloud/parel landing
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.LANDING_DEPLOY_TOKEN }}
-          path: ./parel-monorepo
-          branch: chore/cli-installer-${{ github.ref_name }}
-          base: main
-          title: "chore(landing): bump parel-cli installer scripts to ${{ github.ref_name }}"
-          commit-message: "chore(landing): sync install.sh + install.ps1 from parel-cli ${{ github.ref_name }}"
-          repository: parel-cloud/parel
-          add-paths: |
-            landing/public/install.sh
-            landing/public/install.ps1
-        # When this is wired up, an additional step copies scripts/install.sh
-        # and scripts/install.ps1 into ./parel-monorepo/landing/public before
-        # the PR is opened. Wired-up implementation lives in the parel monorepo
-        # PR (Faz 7).
