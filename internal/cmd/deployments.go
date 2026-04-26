@@ -35,6 +35,8 @@ var (
 	depCreateMaxPrice     float64
 	depCreateHFToken      string
 	depCreateWait         bool
+	depCreateYes          bool
+	depCreateAdvanced     bool
 )
 
 var deployCreateCmd = &cobra.Command{
@@ -43,35 +45,31 @@ var deployCreateCmd = &cobra.Command{
 	Long: `Submits a BYOM deployment request to the gateway. With --wait, polls until
 the deployment reaches a terminal state (running / error / stopped).
 
-Examples:
-  parel deployments create --hf-id Qwen/Qwen2.5-7B-Instruct --gpu rtx-4090
-  parel deployments create --hf-id Qwen/Qwen2.5-Coder-32B-Instruct --gpu h100_80gb \
-    --quantization fp8 --idle-timeout 30 --budget 50 --max-price 1.50 --wait`,
+NOT: BYOM = HF'ten kendi GPU'na model deploy etme. Vitrin modelleri (qwen3-max,
+gpt-5.4, deepseek-v3.2 vd.) zaten Parel altyapısında çalışıyor, bunlar için
+deployment yaratılmaz; doğrudan 'parel chat --model qwen3-max' kullan.
+
+Çağırma şekilleri:
+  parel deployments create                         # interactive wizard (next-next)
+  parel deployments create --hf-id Qwen/Qwen2.5-7B-Instruct --gpu rtx-4090 --yes
+  parel deployments create --hf-id ... --gpu ... --quantization fp8 \
+    --idle-timeout 30 --budget 50 --max-price 1.50 --wait`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if depCreateHFID == "" {
-			return errors.New("--hf-id is required")
-		}
 		c, _, err := resolveClient()
 		if err != nil {
 			return err
 		}
+		req, ok, err := wizardCreateDeployment(cmd.Context(), c)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(os.Stderr, "Aborted")
+			return nil
+		}
+
 		ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 		defer cancel()
-
-		req := client.CreateDeploymentRequest{
-			HuggingfaceID:         depCreateHFID,
-			Name:                  fallback(depCreateName, defaultDeploymentName(depCreateHFID)),
-			GPUTier:               depCreateGPUTier,
-			Provider:              depCreateProvider,
-			ProviderMode:          depCreateProviderMode,
-			AllocationMode:        depCreateAllocation,
-			Quantization:          depCreateQuant,
-			IdleTimeoutMinutes:    depCreateIdleTimeout,
-			BudgetLimitUSD:        depCreateBudget,
-			MaxModelLen:           depCreateMaxModelLen,
-			ExpectedMaxPricePerHr: depCreateMaxPrice,
-			HFToken:               depCreateHFToken,
-		}
 		dep, err := c.CreateDeployment(ctx, req)
 		if err != nil {
 			return printError(err)
@@ -84,7 +82,7 @@ Examples:
 			dep.ID, dep.Status, dep.GPULabel, dep.Provider)
 
 		if !depCreateWait {
-			fmt.Fprintf(os.Stdout, "\nPoll progress with: parel deployments events %s --follow\n", dep.ID)
+			fmt.Fprintf(os.Stdout, "\nDurumu izle: parel deployments events %s --follow\n", dep.ID)
 			return nil
 		}
 
@@ -98,6 +96,11 @@ Examples:
 		fmt.Fprintf(os.Stdout, "\nDeployment %s is %s\n", final.ID, final.Status)
 		if final.Status == "running" {
 			fmt.Fprintf(os.Stdout, "Model id: %s\n", final.ParelModelID)
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout, "Hemen dene:")
+			fmt.Fprintf(os.Stdout, "  parel chat --model %s \"merhaba\"\n", final.ParelModelID)
+			fmt.Fprintf(os.Stdout, "  parel claude-code init --model %s\n", final.ParelModelID)
+			fmt.Fprintf(os.Stdout, "  parel proxy --upstream %s\n", final.ParelModelID)
 		}
 		if final.ErrorMessage != "" {
 			fmt.Fprintf(os.Stdout, "Error: %s\n", final.ErrorMessage)
@@ -604,12 +607,14 @@ func init() {
 	deployCreateCmd.Flags().StringVar(&depCreateProviderMode, "provider-mode", "", "manual or auto (smart routing)")
 	deployCreateCmd.Flags().StringVar(&depCreateAllocation, "allocation", "", "exact or auto allocation mode")
 	deployCreateCmd.Flags().StringVar(&depCreateQuant, "quantization", "", "fp16 / fp8 / awq / gptq (default: HF auto)")
-	deployCreateCmd.Flags().IntVar(&depCreateIdleTimeout, "idle-timeout", 15, "minutes of idle before sleep")
-	deployCreateCmd.Flags().Float64Var(&depCreateBudget, "budget", 100.0, "USD budget cap")
+	deployCreateCmd.Flags().IntVar(&depCreateIdleTimeout, "idle-timeout", 0, "minutes of idle before sleep (0=ask, default 15)")
+	deployCreateCmd.Flags().Float64Var(&depCreateBudget, "budget", 0, "USD budget cap (0=use preview suggestion ~hourly*168*1.2)")
 	deployCreateCmd.Flags().IntVar(&depCreateMaxModelLen, "max-model-len", 8192, "vLLM max_model_len")
 	deployCreateCmd.Flags().Float64Var(&depCreateMaxPrice, "max-price", 0, "expected_max_price_per_hr (price-confirmation gate)")
 	deployCreateCmd.Flags().StringVar(&depCreateHFToken, "hf-token", "", "HuggingFace token for gated models")
 	deployCreateCmd.Flags().BoolVar(&depCreateWait, "wait", false, "poll until deployment reaches a terminal status")
+	deployCreateCmd.Flags().BoolVarP(&depCreateYes, "yes", "y", false, "skip confirmation prompts (use flags + defaults)")
+	deployCreateCmd.Flags().BoolVar(&depCreateAdvanced, "advanced", false, "show advanced wizard steps (provider picker)")
 
 	deployListCmd.Flags().StringVar(&depListStatus, "status", "", "filter by status (running, stopped, error, ...)")
 

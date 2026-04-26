@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-27
+
+### Added
+- `parel deployments create` artık interaktif bir wizard. Komut hiçbir flag
+  olmadan çalıştırılırsa kullanıcıya sırasıyla şu adımlar sorulur:
+  1. **HF model id** — autocomplete önerileriyle (en çok deploy edilenler).
+     Boş bırakılırsa ilk öneri kullanılır.
+  2. **HF validate** — otomatik çağırılır, mimari + VRAM (fp16/int4) +
+     ghost test sonucu + önerilen GPU tier ekrana yazılır.
+  3. **GPU tier** — `/v1/gpu-tiers/live` listesinden picker; her satırda
+     VRAM, $/hr, kapasite. Önerilen tier `[önerilen]` etiketli, default
+     seçili. Önerinin altındaki VRAM'lı tier'a `⚠ VRAM dar` uyarısı.
+  4. **Quantization** — auto/fp16/fp8/awq/gptq picker.
+  5. **Provider** (sadece `--advanced` ile) — auto smart routing veya
+     manuel runpod/vastai/modal seçimi.
+  6. **Idle timeout** ve **Budget cap** — backend'in `preview` döndürdüğü
+     `hourly_cost_usd × 168 × 1.2` budget önerisi default; yoksa $50.
+  7. **Özet kartı** — model, GPU, ETA, saatlik cost, S3 cache durumu;
+     ardından y/N onayı.
+- Başarılı tamamlanma sonrası "Hemen dene" cheat sheet: `parel chat`,
+  `parel claude-code init --model`, `parel proxy --upstream`.
+- `--yes` flag'i: tüm prompt'ları atlar, eksik flag'ler için default'lar
+  kullanılır (CI / scripting modu).
+- `--advanced` flag'i: provider seçim adımını wizard'a ekler.
+
+### Changed
+- `--idle-timeout` ve `--budget` default'ları 0'a çekildi. Sıfır verilirse
+  wizard prompt'unu tetikler veya preview önerisini kullanır. Eski
+  davranış: `--idle-timeout 15 --budget 100` flag'leriyle aynı.
+
 ## [0.1.1] - 2026-04-26
 
 ### Fixed
