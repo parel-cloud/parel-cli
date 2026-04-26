@@ -1,0 +1,29 @@
+# Build artifacts
+/dist/
+/bin/
+/parel
+/parel.exe
+*.test
+*.out
+coverage.txt
+
+# Go
+/vendor/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Goreleaser snapshot
+.goreleaser-snapshot/
