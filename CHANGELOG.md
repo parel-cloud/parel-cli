@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - TBD (initial public release)
+## [0.1.1] - 2026-04-26
+
+### Fixed
+- `parel claude-code init` model picker now lists BYOM (dedicated) and
+  imported HF instant tenant models. Previously the picker filter was too
+  strict on `model_type` and silently dropped any model with an empty type
+  (which is the default for BYOM).
+
+### Changed
+- Model picker is now hierarchical: the wizard first asks **Kendi GPU'm
+  (BYOM)** / **Import ettiğim modeller** / **Parel vitrini**, then narrows
+  to the chosen bucket. Single-bucket users skip the first step. Each
+  picker entry carries a `[BYOM]` / `[Instant]` rosette so the source is
+  obvious at a glance.
+
+## [0.1.0] - 2026-04-26 (initial public release)
 
 ### Added
 - Repository scaffold with Cobra-based CLI skeleton (`parel`).

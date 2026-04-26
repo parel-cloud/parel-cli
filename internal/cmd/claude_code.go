@@ -162,6 +162,14 @@ var claudeCodeUninstallCmd = &cobra.Command{
 	},
 }
 
+// modelGroup labels a curated source bucket for the hierarchical picker.
+type modelGroup struct {
+	kind    string // "dedicated" | "instant" | "platform"
+	label   string
+	hint    string
+	models  []client.Model
+}
+
 func pickDefaultModel(parent context.Context, apiKey string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
@@ -170,51 +178,148 @@ func pickDefaultModel(parent context.Context, apiKey string) (string, string, er
 	if err != nil {
 		return "", "", printError(err)
 	}
-	candidates := filterClaudeCodeCandidates(models.Data)
-	if len(candidates) == 0 {
+	groups := groupCandidates(models.Data)
+	nonEmpty := make([]modelGroup, 0, 3)
+	for _, g := range groups {
+		if len(g.models) > 0 {
+			nonEmpty = append(nonEmpty, g)
+		}
+	}
+	if len(nonEmpty) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: no chat-capable Parel models found; defaulting to qwen3-max")
 		return "qwen3-max", "qwen3-max", nil
 	}
-	options := make([]string, len(candidates))
-	for i, m := range candidates {
-		label := m.ID
-		if m.DisplayName != "" && m.DisplayName != m.ID {
-			label = fmt.Sprintf("%s — %s", m.ID, m.DisplayName)
+
+	// Choose the group: skip the prompt when there's only one non-empty bucket.
+	var chosen modelGroup
+	if len(nonEmpty) == 1 {
+		chosen = nonEmpty[0]
+	} else {
+		groupOpts := make([]string, len(nonEmpty))
+		for i, g := range nonEmpty {
+			groupOpts[i] = fmt.Sprintf("%s  (%d)  — %s", g.label, len(g.models), g.hint)
 		}
-		options[i] = label
+		var picked string
+		gp := &survey.Select{
+			Message: "Hangi modellerden seçelim?",
+			Options: groupOpts,
+			Help:    "BYOM = kendi kiraladığın GPU. Instant = HuggingFace'ten import ettiğin tenant modelleri. Vitrin = Parel'in yayında olan modelleri.",
+		}
+		if err := survey.AskOne(gp, &picked); err != nil {
+			return "", "", err
+		}
+		for i, opt := range groupOpts {
+			if opt == picked {
+				chosen = nonEmpty[i]
+				break
+			}
+		}
+	}
+
+	options := make([]string, len(chosen.models))
+	byLabel := make(map[string]client.Model, len(chosen.models))
+	for i, m := range chosen.models {
+		options[i] = formatPickerLabel(m)
+		byLabel[options[i]] = m
 	}
 	var picked string
 	prompt := &survey.Select{
-		Message: "Pick the default Parel model for /model picker:",
+		Message: fmt.Sprintf("%s içinden seç:", chosen.label),
 		Options: options,
 	}
 	if err := survey.AskOne(prompt, &picked); err != nil {
 		return "", "", err
 	}
-	id := strings.SplitN(picked, " — ", 2)[0]
-	for _, m := range candidates {
-		if m.ID == id {
-			return m.ID, m.DisplayName, nil
-		}
+	if m, ok := byLabel[picked]; ok {
+		return m.ID, m.DisplayName, nil
 	}
+	id := strings.TrimPrefix(strings.SplitN(picked, " — ", 2)[0], "[BYOM] ")
+	id = strings.TrimPrefix(id, "[Instant] ")
 	return id, id, nil
 }
 
+// groupCandidates returns the three buckets in the canonical onboarding order:
+// the user's own dedicated BYOM deployments first, then their imported HF
+// instant models, then the Parel showcase / platform catalog.
+func groupCandidates(in []client.Model) []modelGroup {
+	candidates := filterClaudeCodeCandidates(in)
+	g := []modelGroup{
+		{kind: "dedicated", label: "Kendi GPU'm (BYOM)", hint: "kiraladığın deployment'lar"},
+		{kind: "instant", label: "Import ettiğim modeller", hint: "HuggingFace tenant model'leri"},
+		{kind: "platform", label: "Parel vitrini", hint: "qwen3-max, gpt-5.4, deepseek-v3.2 ..."},
+	}
+	for _, m := range candidates {
+		switch {
+		case strings.HasPrefix(m.ID, "byom-") || strings.EqualFold(m.Source, "dedicated"):
+			g[0].models = append(g[0].models, m)
+		case strings.HasPrefix(m.ID, "tm_") || strings.EqualFold(m.Source, "instant"):
+			g[1].models = append(g[1].models, m)
+		default:
+			g[2].models = append(g[2].models, m)
+		}
+	}
+	return g
+}
+
+// filterClaudeCodeCandidates picks the models that make sense as Claude Code's
+// brain and orders them: dedicated BYOM (the user's own GPU) first, then
+// imported HF instant tenant models, then platform/showcase models. Anthropic-
+// native models are filtered out because the gateway's /anthropic/v1/messages
+// proxy explicitly rejects them, and visual modalities (image/video/audio) are
+// dropped because Claude Code wants chat models.
 func filterClaudeCodeCandidates(in []client.Model) []client.Model {
-	out := make([]client.Model, 0, len(in))
+	var dedicated, instant, platform []client.Model
 	for _, m := range in {
 		if strings.HasPrefix(m.ID, "claude-") || strings.HasPrefix(m.ID, "anthropic/") {
 			continue
 		}
-		if m.ModelType != "" && !strings.Contains(strings.ToLower(m.ModelType), "llm") &&
-			!strings.Contains(strings.ToLower(m.ModelType), "chat") {
-			continue
+		// Drop strictly-not-text modalities. BYOM models often have empty
+		// model_type so we keep them; we only filter when the type is
+		// definitively non-text.
+		if mt := strings.ToLower(m.ModelType); mt != "" {
+			if strings.Contains(mt, "image") || strings.Contains(mt, "video") ||
+				strings.Contains(mt, "audio") || strings.Contains(mt, "tts") ||
+				strings.Contains(mt, "stt") || strings.Contains(mt, "embed") {
+				continue
+			}
 		}
 		if m.IsReady != nil && !*m.IsReady {
 			continue
 		}
-		out = append(out, m)
+
+		switch {
+		case strings.HasPrefix(m.ID, "byom-") || strings.EqualFold(m.Source, "dedicated"):
+			dedicated = append(dedicated, m)
+		case strings.HasPrefix(m.ID, "tm_") || strings.EqualFold(m.Source, "instant"):
+			instant = append(instant, m)
+		default:
+			platform = append(platform, m)
+		}
 	}
+
+	out := make([]client.Model, 0, len(dedicated)+len(instant)+len(platform))
+	out = append(out, dedicated...)
+	out = append(out, instant...)
+	out = append(out, platform...)
 	return out
+}
+
+// formatPickerLabel renders a one-line picker entry with a source rosette so
+// the user can tell BYOM (their own GPU) from instant API or platform models
+// at a glance.
+func formatPickerLabel(m client.Model) string {
+	var rosette string
+	switch {
+	case strings.HasPrefix(m.ID, "byom-") || strings.EqualFold(m.Source, "dedicated"):
+		rosette = "[BYOM] "
+	case strings.HasPrefix(m.ID, "tm_") || strings.EqualFold(m.Source, "instant"):
+		rosette = "[Instant] "
+	}
+	display := m.DisplayName
+	if display == "" || display == m.ID {
+		return rosette + m.ID
+	}
+	return fmt.Sprintf("%s%s — %s", rosette, m.ID, display)
 }
 
 func init() {
