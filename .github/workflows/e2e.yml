@@ -1,0 +1,58 @@
+name: e2e
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly 03:00 UTC. Soft-fail (continue-on-error) so a transient gateway
+    # hiccup doesn't paint the dashboard red.
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.PAREL_SMOKE_API_KEY != '' }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - run: go build -o parel ./cmd/parel
+
+      - name: parel auth whoami
+        env:
+          PAREL_API_KEY: ${{ secrets.PAREL_SMOKE_API_KEY }}
+        run: ./parel auth whoami
+
+      - name: parel models list
+        env:
+          PAREL_API_KEY: ${{ secrets.PAREL_SMOKE_API_KEY }}
+        run: ./parel models list --json | head -50
+
+      - name: parel chat (non-stream)
+        env:
+          PAREL_API_KEY: ${{ secrets.PAREL_SMOKE_API_KEY }}
+        run: ./parel chat "ping" --model qwen3-max --max-tokens 16
+
+      - name: parel chat --stream
+        env:
+          PAREL_API_KEY: ${{ secrets.PAREL_SMOKE_API_KEY }}
+        run: ./parel chat "stream test" --model qwen3-max --stream --max-tokens 16
+
+      - name: parel proxy + curl
+        env:
+          PAREL_API_KEY: ${{ secrets.PAREL_SMOKE_API_KEY }}
+        run: |
+          ./parel proxy --port 17878 --quiet &
+          PROXY_PID=$!
+          sleep 2
+          curl -fsS http://127.0.0.1:17878/healthz | tee /dev/stderr | grep '"ok":true'
+          curl -fsS -X POST http://127.0.0.1:17878/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{"model":"qwen3-max","max_tokens":8,"messages":[{"role":"user","content":"ping"}]}' \
+            | head -c 4096
+          kill $PROXY_PID
