@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,31 @@ import (
 	"github.com/parel-cloud/parel-cli/internal/installer"
 	"github.com/spf13/cobra"
 )
+
+// disableMarkerPath returns the marker file the shell snippet checks at runtime.
+// When this file exists, `claude-parel` falls through to the unmodified `claude`
+// binary, which lets the user dodge a broken Parel custom model without having
+// to edit the profile or restart their shell.
+func disableMarkerPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".parel", "claude-code.disabled"), nil
+}
+
+func disableMarkerExists() (bool, string, error) {
+	path, err := disableMarkerPath()
+	if err != nil {
+		return false, "", err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true, path, nil
+	} else if !os.IsNotExist(err) {
+		return false, path, err
+	}
+	return false, path, nil
+}
 
 var claudeCodeCmd = &cobra.Command{
 	Use:   "claude-code",
@@ -130,13 +156,86 @@ var claudeCodeStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		disabled, markerPath, err := disableMarkerExists()
+		if err != nil {
+			return err
+		}
 		fmt.Fprintf(os.Stdout, "profile: %s\n", shell.Path)
+		if disabled {
+			fmt.Fprintf(os.Stdout, "state:   DISABLED (marker: %s)\n", markerPath)
+			fmt.Fprintln(os.Stdout, "         claude-parel falls through to plain `claude`. Run `parel claude-code enable` to restore.")
+		} else {
+			fmt.Fprintln(os.Stdout, "state:   enabled")
+		}
 		if block == "" {
 			fmt.Fprintln(os.Stdout, "no parel claude-code block installed (run `parel claude-code init`)")
 			return nil
 		}
 		fmt.Fprintln(os.Stdout, "---")
 		fmt.Fprintln(os.Stdout, block)
+		return nil
+	},
+}
+
+var claudeCodeDisableCmd = &cobra.Command{
+	Use:   "disable",
+	Short: "Temporarily route claude-parel to plain `claude` (skip Parel custom model)",
+	Long: `Creates a marker file at ~/.parel/claude-code.disabled. The shell snippet
+checks this on every invocation, so claude-parel falls through to the plain
+` + "`claude`" + ` binary without injecting any Parel env vars or the custom model option.
+
+Useful when auto / agentic mode breaks because the chosen Parel model is
+misbehaving. Re-enable with ` + "`parel claude-code enable`" + `. Effect is instant,
+no shell restart needed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path, err := disableMarkerPath()
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if _, err := fmt.Fprintf(f, "disabled by `parel claude-code disable` at %s\n", time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+
+		// Best-effort sanity check: if no installed block, the marker has nothing
+		// to gate. Tell the user, but still leave the marker — it's harmless.
+		shell, shellErr := installer.DetectShell()
+		if shellErr == nil {
+			if block, _ := installer.Inspect(shell.Path); block == "" {
+				fmt.Fprintf(os.Stderr, "note: no parel claude-code block found in %s. Run `parel claude-code init` to install the launcher.\n", shell.Path)
+			} else if !strings.Contains(block, "claude-code.disabled") {
+				fmt.Fprintln(os.Stderr, "note: your installed snippet is older and does not check the disable marker. Run `parel claude-code init` to refresh.")
+			}
+		}
+
+		fmt.Fprintf(os.Stdout, "Disabled. claude-parel will pass through to plain `claude` until you run `parel claude-code enable`.\nMarker: %s\n", path)
+		return nil
+	},
+}
+
+var claudeCodeEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Re-enable the Parel custom model option in claude-parel",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path, err := disableMarkerPath()
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				fmt.Fprintln(os.Stdout, "Already enabled (no disable marker present).")
+				return nil
+			}
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "Enabled. claude-parel will route through Parel again.")
 		return nil
 	},
 }
@@ -328,6 +427,6 @@ func init() {
 	claudeCodeInitCmd.Flags().StringVar(&ccInitAPIKey, "api-key", "", "Parel API key (skip prompt)")
 	claudeCodeInitCmd.Flags().StringVar(&ccInitProfilePath, "profile-path", "", "override profile file path")
 
-	claudeCodeCmd.AddCommand(claudeCodeInitCmd, claudeCodeStatusCmd, claudeCodeUninstallCmd)
+	claudeCodeCmd.AddCommand(claudeCodeInitCmd, claudeCodeStatusCmd, claudeCodeDisableCmd, claudeCodeEnableCmd, claudeCodeUninstallCmd)
 	rootCmd.AddCommand(claudeCodeCmd)
 }

@@ -27,12 +27,29 @@ func TestPosixSnippet_ContainsRequiredEnvVars(t *testing.T) {
 		`ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="$name"`,
 		`ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Parel gateway - $model"`,
 		`claude-parel()`,
+		`if [ -f "$HOME/.parel/claude-code.disabled" ]; then`,
+		`command claude "$@"; return`,
 		`claude "$@"`,
 	}
 	for _, want := range required {
 		if !strings.Contains(out, want) {
 			t.Errorf("POSIX snippet missing %q", want)
 		}
+	}
+}
+
+// TestPosixSnippet_MarkerCheckIsFirstStatement guards the order: the marker
+// short-circuit must run before any Parel env var assignment. Otherwise
+// `claude-parel` would still leak ANTHROPIC_* vars even when disabled.
+func TestPosixSnippet_MarkerCheckIsFirstStatement(t *testing.T) {
+	out := PosixSnippet(sampleEnv())
+	markerIdx := strings.Index(out, `claude-code.disabled`)
+	envIdx := strings.Index(out, `ANTHROPIC_BASE_URL=`)
+	if markerIdx < 0 || envIdx < 0 {
+		t.Fatalf("snippet missing expected lines: %q", out)
+	}
+	if markerIdx > envIdx {
+		t.Errorf("marker check must precede ANTHROPIC_BASE_URL assignment; got marker@%d > env@%d", markerIdx, envIdx)
 	}
 }
 
@@ -45,6 +62,8 @@ func TestPowerShellSnippet_ContainsRequiredEnvVars(t *testing.T) {
 		`$env:ANTHROPIC_API_KEY = ""`,
 		`$env:ANTHROPIC_CUSTOM_MODEL_OPTION = $model`,
 		`function claude-parel`,
+		`if (Test-Path "$HOME/.parel/claude-code.disabled") {`,
+		`& claude @args; return`,
 		`claude @rest`,
 	}
 	for _, want := range required {
@@ -95,6 +114,8 @@ func TestSnippet_ParityWithMonorepo(t *testing.T) {
 		`ANTHROPIC_API_KEY=""`,
 		`ANTHROPIC_CUSTOM_MODEL_OPTION="$model"`,
 		`ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Parel gateway - $model"`,
+		`if [ -f "$HOME/.parel/claude-code.disabled" ]; then`,
+		`command claude "$@"; return`,
 		`claude "$@"`,
 	}
 	pwshCanon := []string{
@@ -103,6 +124,8 @@ func TestSnippet_ParityWithMonorepo(t *testing.T) {
 		`$env:ANTHROPIC_API_KEY = ""`,
 		`$env:ANTHROPIC_CUSTOM_MODEL_OPTION = $model`,
 		`function claude-parel`,
+		`if (Test-Path "$HOME/.parel/claude-code.disabled") {`,
+		`& claude @args; return`,
 		`claude @rest`,
 	}
 	for _, want := range posixCanon {

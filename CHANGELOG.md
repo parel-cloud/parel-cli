@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-27
+
+### Added
+- `parel claude-code disable` and `parel claude-code enable` toggle the
+  Parel custom model option without uninstalling the launcher. `disable`
+  drops a marker at `~/.parel/claude-code.disabled`; the shell snippet now
+  checks that file on every invocation and falls through to the unmodified
+  `claude` binary when the marker is present. Useful when auto / agentic
+  mode breaks because the chosen Parel model is misbehaving. Effect is
+  instant, no shell restart needed. `enable` removes the marker.
+- `parel claude-code status` reports `enabled` / `DISABLED` and prints the
+  marker path. Older installed snippets without the marker check are
+  detected and the user is nudged to re-run `parel claude-code init`.
+
+### Changed
+- POSIX and PowerShell `claude-parel` launcher snippets gained a marker
+  short-circuit at the top of the function body. The web UI snippet
+  (`web/src/components/connect-claude-code.tsx`) was updated in lockstep;
+  the parity test asserts both lines appear verbatim in the TS source.
+
 ## [0.1.3] - 2026-04-27
 
 ### Changed
