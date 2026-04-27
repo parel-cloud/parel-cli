@@ -7,35 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-27
+
+### Changed
+- All CLI prompts, help text, summary cards and shell snippet comments are
+  now in English. The `claude-parel` launcher block written into the user's
+  profile is also English-only. The web UI snippet remains the source of
+  truth for the env-var contract; the parity test enforces only the
+  literal env-var assignments.
+
 ## [0.1.2] - 2026-04-27
 
 ### Added
-- `parel deployments create` artık interaktif bir wizard. Komut hiçbir flag
-  olmadan çalıştırılırsa kullanıcıya sırasıyla şu adımlar sorulur:
-  1. **HF model id** — autocomplete önerileriyle (en çok deploy edilenler).
-     Boş bırakılırsa ilk öneri kullanılır.
-  2. **HF validate** — otomatik çağırılır, mimari + VRAM (fp16/int4) +
-     ghost test sonucu + önerilen GPU tier ekrana yazılır.
-  3. **GPU tier** — `/v1/gpu-tiers/live` listesinden picker; her satırda
-     VRAM, $/hr, kapasite. Önerilen tier `[önerilen]` etiketli, default
-     seçili. Önerinin altındaki VRAM'lı tier'a `⚠ VRAM dar` uyarısı.
+- `parel deployments create` is now an interactive wizard. Running the
+  command with no flags walks the user through:
+  1. **HF model id** — with autocomplete suggestions (top-deployed models).
+     Empty input falls back to the first suggestion.
+  2. **HF validate** — runs automatically; prints architecture, VRAM
+     (fp16/int4), ghost test result, and recommended GPU tier.
+  3. **GPU tier** — picker driven by `/v1/gpu-tiers/live`; each row shows
+     VRAM, $/hr, and capacity. The recommended tier is marked `[recommended]`
+     and pre-selected. Tiers smaller than the recommended VRAM get a
+     `! VRAM tight` warning.
   4. **Quantization** — auto/fp16/fp8/awq/gptq picker.
-  5. **Provider** (sadece `--advanced` ile) — auto smart routing veya
-     manuel runpod/vastai/modal seçimi.
-  6. **Idle timeout** ve **Budget cap** — backend'in `preview` döndürdüğü
-     `hourly_cost_usd × 168 × 1.2` budget önerisi default; yoksa $50.
-  7. **Özet kartı** — model, GPU, ETA, saatlik cost, S3 cache durumu;
-     ardından y/N onayı.
-- Başarılı tamamlanma sonrası "Hemen dene" cheat sheet: `parel chat`,
+  5. **Provider** (`--advanced` only) — auto smart routing or manual
+     runpod/vastai/modal pick.
+  6. **Idle timeout** and **Budget cap** — the budget default comes from
+     the gateway preview's `hourly_cost_usd × 168 × 1.2`, falling back to $50.
+  7. **Summary card** — model, GPU, ETA, hourly cost, S3 cache state;
+     followed by a y/N confirmation.
+- Success path prints a "Try it now" cheat sheet: `parel chat`,
   `parel claude-code init --model`, `parel proxy --upstream`.
-- `--yes` flag'i: tüm prompt'ları atlar, eksik flag'ler için default'lar
-  kullanılır (CI / scripting modu).
-- `--advanced` flag'i: provider seçim adımını wizard'a ekler.
+- `--yes` flag: skips every prompt; missing flags fall back to defaults
+  (CI / scripting mode).
+- `--advanced` flag: surfaces the provider picker step.
 
 ### Changed
-- `--idle-timeout` ve `--budget` default'ları 0'a çekildi. Sıfır verilirse
-  wizard prompt'unu tetikler veya preview önerisini kullanır. Eski
-  davranış: `--idle-timeout 15 --budget 100` flag'leriyle aynı.
+- `--idle-timeout` and `--budget` defaults are now 0. Zero triggers the
+  wizard prompt or uses the preview suggestion. Old behaviour matches
+  `--idle-timeout 15 --budget 100`.
 
 ## [0.1.1] - 2026-04-26
 
@@ -46,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (which is the default for BYOM).
 
 ### Changed
-- Model picker is now hierarchical: the wizard first asks **Kendi GPU'm
-  (BYOM)** / **Import ettiğim modeller** / **Parel vitrini**, then narrows
+- Model picker is now hierarchical: the wizard first asks **My own GPUs
+  (BYOM)** / **My imported models** / **Parel showcase**, then narrows
   to the chosen bucket. Single-bucket users skip the first step. Each
   picker entry carries a `[BYOM]` / `[Instant]` rosette so the source is
   obvious at a glance.

@@ -51,7 +51,7 @@ Examples:
 		if apiKey == "" && !authLoginNonInteractive {
 			prompt := &survey.Password{
 				Message: "Parel API key (paste; will not echo):",
-				Help:    "Generate one at https://app.parel.cloud → API Anahtarlari",
+				Help:    "Generate one at https://app.parel.cloud → API Keys",
 			}
 			if err := survey.AskOne(prompt, &apiKey, survey.WithValidator(survey.Required)); err != nil {
 				return err

@@ -1,10 +1,10 @@
 // Package installer generates and writes the `claude-parel` shell launcher
 // installed by `parel claude-code init`.
 //
-// The shell snippet is byte-identical with web/src/components/connect-claude-code.tsx
-// (function buildShellSetup, lines 155-215 in the parel monorepo). A golden
-// test enforces parity by extracting the TS template literal and comparing the
-// generated POSIX/PowerShell output.
+// The shell snippet keeps the env-var contract identical to
+// web/src/components/connect-claude-code.tsx (function buildShellSetup,
+// lines 155-215 in the parel monorepo). The CLI ships English comments;
+// the parity test only enforces the literal env-var assignments.
 package installer
 
 import "strings"
@@ -24,12 +24,12 @@ func PosixSnippet(env SnippetEnv) string {
 		apiKey = "parel_..."
 	}
 	return strings.Join([]string{
-		`# Parel icin Claude Code launcher — default ` + "`claude`" + ` komutu dokunulmaz.`,
-		`# Kullanim:    claude-parel`,
-		`# Farkli model: claude-parel -m qwen3.5-coder-32b`,
+		`# Parel launcher for Claude Code — default ` + "`claude`" + ` command stays untouched.`,
+		`# Usage:        claude-parel`,
+		`# Switch model: claude-parel -m qwen3.5-coder-32b`,
 		`PAREL_MODEL_ID="` + env.ModelID + `"`,
 		`PAREL_MODEL_NAME="` + env.ModelName + `"`,
-		`PAREL_API_KEY="` + apiKey + `"   # api.parel.cloud > API Anahtarlari`,
+		`PAREL_API_KEY="` + apiKey + `"   # app.parel.cloud > API Keys`,
 		``,
 		`claude-parel() {`,
 		`  local model="$PAREL_MODEL_ID" name="$PAREL_MODEL_NAME"`,
@@ -54,12 +54,12 @@ func PowerShellSnippet(env SnippetEnv) string {
 		apiKey = "parel_..."
 	}
 	return strings.Join([]string{
-		`# Parel icin Claude Code launcher — default ` + "`claude`" + ` komutu dokunulmaz.`,
-		`# Kullanim:    claude-parel`,
-		`# Farkli model: claude-parel -m qwen3.5-coder-32b`,
+		`# Parel launcher for Claude Code — default ` + "`claude`" + ` command stays untouched.`,
+		`# Usage:        claude-parel`,
+		`# Switch model: claude-parel -m qwen3.5-coder-32b`,
 		`$PAREL_MODEL_ID = "` + env.ModelID + `"`,
 		`$PAREL_MODEL_NAME = "` + env.ModelName + `"`,
-		`$PAREL_API_KEY = "` + apiKey + `"   # api.parel.cloud > API Anahtarlari`,
+		`$PAREL_API_KEY = "` + apiKey + `"   # app.parel.cloud > API Keys`,
 		``,
 		`function claude-parel {`,
 		`  $model = $PAREL_MODEL_ID; $name = $PAREL_MODEL_NAME; $rest = @()`,

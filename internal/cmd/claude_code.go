@@ -201,9 +201,9 @@ func pickDefaultModel(parent context.Context, apiKey string) (string, string, er
 		}
 		var picked string
 		gp := &survey.Select{
-			Message: "Hangi modellerden seçelim?",
+			Message: "Which models would you like to choose from?",
 			Options: groupOpts,
-			Help:    "BYOM = kendi kiraladığın GPU. Instant = HuggingFace'ten import ettiğin tenant modelleri. Vitrin = Parel'in yayında olan modelleri.",
+			Help:    "BYOM = your own rented GPU. Instant = your imported HuggingFace tenant models. Showcase = Parel's hosted catalog.",
 		}
 		if err := survey.AskOne(gp, &picked); err != nil {
 			return "", "", err
@@ -224,7 +224,7 @@ func pickDefaultModel(parent context.Context, apiKey string) (string, string, er
 	}
 	var picked string
 	prompt := &survey.Select{
-		Message: fmt.Sprintf("%s içinden seç:", chosen.label),
+		Message: fmt.Sprintf("Pick a model from %s:", chosen.label),
 		Options: options,
 	}
 	if err := survey.AskOne(prompt, &picked); err != nil {
@@ -244,9 +244,9 @@ func pickDefaultModel(parent context.Context, apiKey string) (string, string, er
 func groupCandidates(in []client.Model) []modelGroup {
 	candidates := filterClaudeCodeCandidates(in)
 	g := []modelGroup{
-		{kind: "dedicated", label: "Kendi GPU'm (BYOM)", hint: "kiraladığın deployment'lar"},
-		{kind: "instant", label: "Import ettiğim modeller", hint: "HuggingFace tenant model'leri"},
-		{kind: "platform", label: "Parel vitrini", hint: "qwen3-max, gpt-5.4, deepseek-v3.2 ..."},
+		{kind: "dedicated", label: "My own GPUs (BYOM)", hint: "your rented deployments"},
+		{kind: "instant", label: "My imported models", hint: "HuggingFace tenant models"},
+		{kind: "platform", label: "Parel showcase", hint: "qwen3-max, gpt-5.4, deepseek-v3.2 ..."},
 	}
 	for _, m := range candidates {
 		switch {

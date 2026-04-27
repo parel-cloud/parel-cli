@@ -45,11 +45,12 @@ var deployCreateCmd = &cobra.Command{
 	Long: `Submits a BYOM deployment request to the gateway. With --wait, polls until
 the deployment reaches a terminal state (running / error / stopped).
 
-NOT: BYOM = HF'ten kendi GPU'na model deploy etme. Vitrin modelleri (qwen3-max,
-gpt-5.4, deepseek-v3.2 vd.) zaten Parel altyapısında çalışıyor, bunlar için
-deployment yaratılmaz; doğrudan 'parel chat --model qwen3-max' kullan.
+NOTE: BYOM = deploy a model from HuggingFace onto your own rented GPU. Showcase
+models (qwen3-max, gpt-5.4, deepseek-v3.2 etc.) already run on Parel's
+infrastructure and DO NOT need a deployment; use 'parel chat --model qwen3-max'
+directly.
 
-Çağırma şekilleri:
+Invocation forms:
   parel deployments create                         # interactive wizard (next-next)
   parel deployments create --hf-id Qwen/Qwen2.5-7B-Instruct --gpu rtx-4090 --yes
   parel deployments create --hf-id ... --gpu ... --quantization fp8 \
@@ -82,7 +83,7 @@ deployment yaratılmaz; doğrudan 'parel chat --model qwen3-max' kullan.
 			dep.ID, dep.Status, dep.GPULabel, dep.Provider)
 
 		if !depCreateWait {
-			fmt.Fprintf(os.Stdout, "\nDurumu izle: parel deployments events %s --follow\n", dep.ID)
+			fmt.Fprintf(os.Stdout, "\nWatch progress: parel deployments events %s --follow\n", dep.ID)
 			return nil
 		}
 
@@ -97,8 +98,8 @@ deployment yaratılmaz; doğrudan 'parel chat --model qwen3-max' kullan.
 		if final.Status == "running" {
 			fmt.Fprintf(os.Stdout, "Model id: %s\n", final.ParelModelID)
 			fmt.Fprintln(os.Stdout)
-			fmt.Fprintln(os.Stdout, "Hemen dene:")
-			fmt.Fprintf(os.Stdout, "  parel chat --model %s \"merhaba\"\n", final.ParelModelID)
+			fmt.Fprintln(os.Stdout, "Try it now:")
+			fmt.Fprintf(os.Stdout, "  parel chat --model %s \"hello\"\n", final.ParelModelID)
 			fmt.Fprintf(os.Stdout, "  parel claude-code init --model %s\n", final.ParelModelID)
 			fmt.Fprintf(os.Stdout, "  parel proxy --upstream %s\n", final.ParelModelID)
 		}

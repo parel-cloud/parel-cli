@@ -61,18 +61,18 @@ func wizardCreateDeployment(parent context.Context, c *client.Client) (client.Cr
 		return zero, false, err
 	}
 
-	idle, err := wizardAskInt("Idle timeout (dk)",
-		"Bu süre boyunca istek gelmezse pod uyur; tekrar istek gelince 30-60sn'de uyanır.",
+	idle, err := wizardAskInt("Idle timeout (minutes)",
+		"If no requests arrive within this window the pod sleeps; the next request wakes it in 30-60s.",
 		depCreateIdleTimeout, 15, depCreateYes)
 	if err != nil {
 		return zero, false, err
 	}
 
-	// Budget default = backend'in preview önerisi (yoksa fallback).
+	// Budget default = whatever the gateway preview suggests (fallback below).
 	prev := wizardPreview(parent, c, hfID, gpu)
 	budgetDefault := suggestBudget(prev, depCreateBudget)
 	budget, err := wizardAskFloat("Budget cap (USD)",
-		"Bu deployment için üst harcama eşiği. Aşılınca otomatik durur.",
+		"Hard spend cap for this deployment. The pod stops automatically when exceeded.",
 		depCreateBudget, budgetDefault, depCreateYes)
 	if err != nil {
 		return zero, false, err
@@ -99,7 +99,7 @@ func wizardCreateDeployment(parent context.Context, c *client.Client) (client.Cr
 		return req, true, nil
 	}
 	confirm := true
-	if err := survey.AskOne(&survey.Confirm{Message: "Onaylıyor musun?", Default: true}, &confirm); err != nil {
+	if err := survey.AskOne(&survey.Confirm{Message: "Confirm and create?", Default: true}, &confirm); err != nil {
 		return zero, false, err
 	}
 	return req, confirm, nil
@@ -127,8 +127,8 @@ func wizardAskHFID(preset string, nonInteractive bool) (string, error) {
 	var picked string
 	prompt := &survey.Input{
 		Message: "HuggingFace model id:",
-		Help: "Tab ile öneri listesinden seç, ya da kendi HF id'ni yaz. " +
-			"Örnek: Qwen/Qwen2.5-7B-Instruct",
+		Help: "Tab to autocomplete from popular suggestions, or type your own. " +
+			"Example: Qwen/Qwen2.5-7B-Instruct",
 		Suggest: func(toComplete string) []string {
 			out := make([]string, 0, len(suggestedHFIDs))
 			needle := strings.ToLower(toComplete)
@@ -148,9 +148,9 @@ func wizardAskHFID(preset string, nonInteractive bool) (string, error) {
 	}
 	picked = strings.TrimSpace(picked)
 	if picked == "" {
-		// Boş bırakıldıysa autocomplete'in ilki (karar #1)
+		// Empty input → first autocomplete suggestion (decision #1)
 		picked = suggestedHFIDs[0]
-		fmt.Fprintf(os.Stderr, "(boş — varsayılan: %s)\n", picked)
+		fmt.Fprintf(os.Stderr, "(empty — defaulting to %s)\n", picked)
 	}
 	return picked, nil
 }
@@ -160,7 +160,7 @@ func wizardAskHFID(preset string, nonInteractive bool) (string, error) {
 // ---------------------------------------------------------------------------
 
 func wizardValidate(parent context.Context, c *client.Client, hfID string) (*client.HFValidateResponse, error) {
-	fmt.Fprintln(os.Stderr, "  HF validator çalışıyor...")
+	fmt.Fprintln(os.Stderr, "  Running HF validator...")
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	val, err := c.ValidateHF(ctx, client.HFValidateRequest{ModelID: hfID, HFToken: depCreateHFToken})
@@ -175,26 +175,26 @@ func printValidateSuccess(v *client.HFValidateResponse) {
 	if !v.Valid {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ %s\n", v.ModelID)
+	fmt.Fprintf(os.Stderr, "  OK  %s\n", v.ModelID)
 	if v.Architecture != "" {
-		fmt.Fprintf(os.Stderr, "    Mimari       %s\n", v.Architecture)
+		fmt.Fprintf(os.Stderr, "    Architecture  %s\n", v.Architecture)
 	}
 	if v.VRAMFp16GB > 0 {
-		fmt.Fprintf(os.Stderr, "    VRAM fp16    %.1f GB\n", v.VRAMFp16GB)
+		fmt.Fprintf(os.Stderr, "    VRAM fp16     %.1f GB\n", v.VRAMFp16GB)
 	}
 	if v.VRAMInt4GB > 0 {
-		fmt.Fprintf(os.Stderr, "    VRAM int4    %.1f GB\n", v.VRAMInt4GB)
+		fmt.Fprintf(os.Stderr, "    VRAM int4     %.1f GB\n", v.VRAMInt4GB)
 	}
 	if v.RecommendedGPUTier != "" {
-		fmt.Fprintf(os.Stderr, "    Önerilen     %s\n", v.RecommendedGPUTier)
+		fmt.Fprintf(os.Stderr, "    Recommended   %s\n", v.RecommendedGPUTier)
 	}
 	if v.NeedsNewVLLM {
-		fmt.Fprintln(os.Stderr, "    ⚠ Bu model daha yeni vLLM gerektirebilir; provider sınırlı.")
+		fmt.Fprintln(os.Stderr, "    !  This model may need a newer vLLM image; provider compatibility limited.")
 	}
 }
 
 func printValidateFailure(v *client.HFValidateResponse) {
-	fmt.Fprintf(os.Stderr, "  ✗ %s — doğrulama başarısız\n", v.ModelID)
+	fmt.Fprintf(os.Stderr, "  FAIL  %s — validation failed\n", v.ModelID)
 	for _, e := range v.Errors {
 		fmt.Fprintf(os.Stderr, "    - %s\n", e)
 	}
@@ -218,12 +218,12 @@ func wizardPickGPU(parent context.Context, c *client.Client, val *client.HFValid
 		return val.RecommendedGPUTier, nil
 	}
 	if depCreateYes {
-		return "", errors.New("--yes ile çalıştırırken --gpu vermelisin (validator önermedi)")
+		return "", errors.New("--yes requires --gpu (validator did not return a recommendation)")
 	}
 
 	tiers := wizardListTiers(parent, c)
 	if len(tiers) == 0 {
-		// Fallback: serbest input
+		// Fallback: free-form input
 		var custom string
 		err := survey.AskOne(&survey.Input{Message: "GPU tier id:", Default: defaultIfEmpty(val.RecommendedGPUTier, "rtx-4090")}, &custom)
 		return custom, err
@@ -235,14 +235,14 @@ func wizardPickGPU(parent context.Context, c *client.Client, val *client.HFValid
 	for _, t := range tiers {
 		marker := ""
 		if val != nil && t.ID == val.RecommendedGPUTier {
-			marker = "  [önerilen]"
+			marker = "  [recommended]"
 		}
 		warn := ""
 		if recVRAM > 0 && float64(t.VRAMGB) < recVRAM*1.15 {
-			warn = "  ⚠ VRAM dar"
+			warn = "  ! VRAM tight"
 		}
 		opt := fmt.Sprintf("%-14s %3d GB · $%.4f/hr · %s%s%s",
-			t.ID, t.VRAMGB, t.PricePerHrUSD, fallback(t.Capacity, "kapasite ?"), marker, warn)
+			t.ID, t.VRAMGB, t.PricePerHrUSD, fallback(t.Capacity, "capacity ?"), marker, warn)
 		options = append(options, opt)
 		if val != nil && t.ID == val.RecommendedGPUTier {
 			defaultOpt = opt
@@ -262,7 +262,7 @@ func wizardPickGPU(parent context.Context, c *client.Client, val *client.HFValid
 	}
 	idx := indexOf(options, picked)
 	if idx < 0 {
-		return "", fmt.Errorf("seçim eşleşmedi: %q", picked)
+		return "", fmt.Errorf("selection did not match: %q", picked)
 	}
 	return tiers[idx].ID, nil
 }
@@ -272,12 +272,12 @@ func wizardListTiers(parent context.Context, c *client.Client) []client.GPUTier 
 	defer cancel()
 	out, err := c.ListGPUTiers(ctx, true)
 	if err != nil {
-		// Live çağrı fail ettiyse cache'li listeyi dene.
+		// Live call failed — fall back to the cached list.
 		ctx2, cancel2 := context.WithTimeout(parent, 10*time.Second)
 		defer cancel2()
 		out2, err2 := c.ListGPUTiers(ctx2, false)
 		if err2 != nil {
-			fmt.Fprintf(os.Stderr, "  ⚠ GPU tier listesi alınamadı, manuel yazman gerekecek (%v)\n", err)
+			fmt.Fprintf(os.Stderr, "  ! Could not load GPU tier list, you'll have to type the id manually (%v)\n", err)
 			return nil
 		}
 		return out2.Data
@@ -293,11 +293,11 @@ var quantizationOptions = []struct {
 	id   string
 	desc string
 }{
-	{"auto", "auto       (HF validator karar versin — önerilen)"},
-	{"fp16", "fp16       tam VRAM, vanilya"},
-	{"fp8", "fp8        ~yarı VRAM, vLLM 0.10+"},
-	{"awq", "awq        ~%30 VRAM, int4 GEMM"},
-	{"gptq", "gptq       ~%30 VRAM, int4"},
+	{"auto", "auto       (let the HF validator decide — recommended)"},
+	{"fp16", "fp16       full VRAM, vanilla"},
+	{"fp8", "fp8        ~half VRAM, vLLM 0.10+"},
+	{"awq", "awq        ~30% VRAM, int4 GEMM"},
+	{"gptq", "gptq       ~30% VRAM, int4"},
 }
 
 func wizardPickQuantization(preset string, nonInteractive bool) (string, error) {
@@ -345,10 +345,10 @@ func wizardPickProvider(presetProvider, presetMode string, advanced, nonInteract
 		return "auto", "", nil
 	}
 	options := []string{
-		"auto      smart routing (runpod → vastai → modal) — önerilen",
-		"runpod    sadece RunPod",
-		"vastai    sadece Vast.ai",
-		"modal     sadece Modal",
+		"auto      smart routing (runpod -> vastai -> modal) — recommended",
+		"runpod    RunPod only",
+		"vastai    Vast.ai only",
+		"modal     Modal only",
 	}
 	var picked string
 	if err := survey.AskOne(&survey.Select{
@@ -427,7 +427,7 @@ func wizardPreview(parent context.Context, c *client.Client, hfID, gpu string) *
 	defer cancel()
 	prev, err := c.PreviewDeployment(ctx, hfID, gpu)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (preview alınamadı: %v)\n", err)
+		fmt.Fprintf(os.Stderr, "  (preview not available: %v)\n", err)
 		return nil
 	}
 	return prev
@@ -456,9 +456,9 @@ func roundCents(v float64) float64 {
 
 func printSummary(req client.CreateDeploymentRequest, prev *client.DeploymentPreview) {
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "  ─────────────────────────────────────────────")
-	fmt.Fprintln(os.Stderr, "  Özet")
-	fmt.Fprintln(os.Stderr, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(os.Stderr, "  ---------------------------------------------")
+	fmt.Fprintln(os.Stderr, "  Summary")
+	fmt.Fprintln(os.Stderr, "  ---------------------------------------------")
 	fmt.Fprintf(os.Stderr, "  Model           %s\n", req.HuggingfaceID)
 	fmt.Fprintf(os.Stderr, "  GPU             %s\n", req.GPUTier)
 	fmt.Fprintf(os.Stderr, "  Quantization    %s\n", fallback(req.Quantization, "auto"))
@@ -467,23 +467,23 @@ func printSummary(req client.CreateDeploymentRequest, prev *client.DeploymentPre
 		provider = "auto (smart routing)"
 	}
 	fmt.Fprintf(os.Stderr, "  Provider        %s\n", provider)
-	fmt.Fprintf(os.Stderr, "  Idle timeout    %d dk\n", req.IdleTimeoutMinutes)
+	fmt.Fprintf(os.Stderr, "  Idle timeout    %d min\n", req.IdleTimeoutMinutes)
 	fmt.Fprintf(os.Stderr, "  Budget cap      $%.2f\n", req.BudgetLimitUSD)
 	if prev != nil {
-		fmt.Fprintln(os.Stderr, "  ─────────────────────────────────────────────")
+		fmt.Fprintln(os.Stderr, "  ---------------------------------------------")
 		if prev.ETAMinutes > 0 {
-			fmt.Fprintf(os.Stderr, "  ETA             ~%.0f dk\n", prev.ETAMinutes)
+			fmt.Fprintf(os.Stderr, "  ETA             ~%.0f min\n", prev.ETAMinutes)
 		}
 		if prev.HourlyCostUSD > 0 {
-			fmt.Fprintf(os.Stderr, "  Saatlik cost    $%.4f\n", prev.HourlyCostUSD)
+			fmt.Fprintf(os.Stderr, "  Hourly cost     $%.4f\n", prev.HourlyCostUSD)
 		}
-		cache := "soğuk (HF→S3 prefetch otomatik başlar)"
+		cache := "cold (HF->S3 prefetch will start automatically)"
 		if prev.IsCached {
-			cache = "sıcak (S3 cache hit) — image_pulling ~1 dk"
+			cache = "warm (S3 cache hit) — image_pulling ~1 min"
 		}
 		fmt.Fprintf(os.Stderr, "  S3 cache        %s\n", cache)
 	}
-	fmt.Fprintln(os.Stderr, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(os.Stderr, "  ---------------------------------------------")
 }
 
 // ---------------------------------------------------------------------------
