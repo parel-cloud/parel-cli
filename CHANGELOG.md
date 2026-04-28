@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `parel claude-code init --model-name "<display>"` flag lets you override the
+  picker label without editing `~/.zshrc` by hand.
+- When `--model-name` is omitted, the CLI now resolves a human-readable name
+  from the gateway: BYOMs come from `/v1/deployments/<uuid>` (display_name →
+  name → huggingface_id), platform/instant models from `/v1/models/<id>` with
+  a `/v1/models` list scan as fallback. The interactive picker also stops
+  discarding the display name it already fetched. Falls back to
+  `"<id> (Parel)"` if every lookup misses.
+
 ## [0.1.4] - 2026-04-27
 
 ### Added

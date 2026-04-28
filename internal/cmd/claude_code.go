@@ -48,6 +48,7 @@ var claudeCodeCmd = &cobra.Command{
 var (
 	ccInitNonInteractive bool
 	ccInitModel          string
+	ccInitModelName      string
 	ccInitAPIKey         string
 	ccInitProfilePath    string
 )
@@ -93,20 +94,32 @@ to switch model in-session.`,
 			return fmt.Errorf("api key is required (run `parel auth login` first or pass --api-key)")
 		}
 
-		// Pick the default model.
+		// Resolve model id + human-readable name. Precedence for the name:
+		//   1. --model-name flag (explicit override)
+		//   2. interactive picker's display_name (from the gateway model row)
+		//   3. /v1/models/<id> lookup when --model was passed non-interactively
+		//   4. fallback: "<id> (Parel)"
 		modelID := ccInitModel
+		modelName := ccInitModelName
 		if modelID == "" && !ccInitNonInteractive {
 			pickedID, pickedDisplay, err := pickDefaultModel(cmd.Context(), apiKey)
 			if err != nil {
 				return err
 			}
 			modelID = pickedID
-			_ = pickedDisplay
+			if modelName == "" {
+				modelName = pickedDisplay
+			}
 		}
 		if modelID == "" {
 			modelID = "qwen3-max"
 		}
-		modelName := modelID + " (Parel)"
+		if modelName == "" {
+			modelName = lookupModelDisplayName(cmd.Context(), apiKey, modelID)
+		}
+		if modelName == "" || modelName == modelID {
+			modelName = modelID + " (Parel)"
+		}
 
 		var snippet string
 		env := installer.SnippetEnv{
@@ -269,6 +282,50 @@ type modelGroup struct {
 	models  []client.Model
 }
 
+// lookupModelDisplayName resolves a human-readable name for modelID by hitting
+// the gateway. Best-effort: any error or empty display_name returns "" so the
+// caller can fall back to "<id> (Parel)" without failing the install.
+//
+// Resolution order:
+//   1. BYOM (id starts with "byom-"): /v1/deployments/<uuid> → display_name|name|huggingface_id
+//   2. /v1/models/<id> (single fetch, works for platform + instant tm_ models)
+//   3. /v1/models list scan (covers tenant-scoped rows that 404 on the single GET)
+func lookupModelDisplayName(parent context.Context, apiKey, modelID string) string {
+	if modelID == "" || apiKey == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	c := client.New(client.Options{APIKey: apiKey, BaseURL: flagBaseURL, Version: version})
+
+	if strings.HasPrefix(modelID, "byom-") {
+		depID := strings.TrimPrefix(modelID, "byom-")
+		if dep, err := c.GetDeployment(ctx, depID); err == nil && dep != nil {
+			if dep.DisplayName != "" {
+				return dep.DisplayName
+			}
+			if dep.Name != "" {
+				return dep.Name
+			}
+			if dep.HuggingfaceID != "" {
+				return dep.HuggingfaceID
+			}
+		}
+	}
+
+	if m, err := c.GetModel(ctx, modelID); err == nil && m != nil && m.DisplayName != "" {
+		return m.DisplayName
+	}
+	if list, err := c.ListModels(ctx); err == nil && list != nil {
+		for _, m := range list.Data {
+			if m.ID == modelID && m.DisplayName != "" {
+				return m.DisplayName
+			}
+		}
+	}
+	return ""
+}
+
 func pickDefaultModel(parent context.Context, apiKey string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
@@ -424,6 +481,7 @@ func formatPickerLabel(m client.Model) string {
 func init() {
 	claudeCodeInitCmd.Flags().BoolVar(&ccInitNonInteractive, "non-interactive", false, "skip prompts (use defaults)")
 	claudeCodeInitCmd.Flags().StringVar(&ccInitModel, "model", "", "default Parel model id (skip picker)")
+	claudeCodeInitCmd.Flags().StringVar(&ccInitModelName, "model-name", "", "display name shown in the /model picker (default: gateway display_name, falls back to \"<id> (Parel)\")")
 	claudeCodeInitCmd.Flags().StringVar(&ccInitAPIKey, "api-key", "", "Parel API key (skip prompt)")
 	claudeCodeInitCmd.Flags().StringVar(&ccInitProfilePath, "profile-path", "", "override profile file path")
 
