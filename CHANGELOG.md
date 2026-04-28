@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-28
+
 ### Added
 - `parel claude-code init --model-name "<display>"` flag lets you override the
   picker label without editing `~/.zshrc` by hand.
