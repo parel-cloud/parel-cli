@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discarding the display name it already fetched. Falls back to
   `"<id> (Parel)"` if every lookup misses.
 
+### Changed
+- `parel claude-code disable` now also comments out every non-marker line in
+  the managed block by prefixing it with `# parel-off: `. After the user
+  re-sources their profile, no `PAREL_*` shell variables and no `claude-parel`
+  function definition remain — so plain `claude` stops seeing the Parel
+  custom model option in the `/model` picker. `enable` strips the prefix back
+  out and the block returns to its original byte-for-byte state. The marker
+  file at `~/.parel/claude-code.disabled` is still maintained for instant
+  in-shell fallthrough; the comment toggle is the durable layer for new
+  shells.
+
 ## [0.1.4] - 2026-04-27
 
 ### Added

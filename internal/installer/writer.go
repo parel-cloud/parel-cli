@@ -115,6 +115,70 @@ func Remove(path string) (bool, error) {
 	return true, os.Rename(tmp, path)
 }
 
+// DisabledLinePrefix is prepended to every non-marker, non-empty line inside
+// the managed block when `parel claude-code disable` runs. After the user
+// re-sources their profile, the block is fully comment-only: no PAREL_ vars,
+// no claude-parel function definition, nothing leaks into the shell. enable
+// strips the prefix back out. The choice of `# parel-off: ` is deliberate —
+// double-comment (extra `#`) on already-comment lines stays a valid comment,
+// and the unique sentinel makes round-tripping idempotent.
+const DisabledLinePrefix = "# parel-off: "
+
+// SetBlockDisabled comments (or uncomments) every line inside the managed
+// block, leaving the markers themselves intact so subsequent toggles can find
+// the block. Returns true when the file was modified. No-op if the block
+// is missing or already in the requested state.
+func SetBlockDisabled(path string, disabled bool) (bool, error) {
+	original, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	loc := blockPattern.FindIndex(original)
+	if loc == nil {
+		return false, nil
+	}
+	prefix := original[:loc[0]]
+	block := original[loc[0]:loc[1]]
+	suffix := original[loc[1]:]
+
+	lines := strings.Split(string(block), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == "" {
+			continue
+		}
+		// Marker lines are how we re-locate the block; never touch them.
+		if strings.Contains(line, BeginMarker) || strings.Contains(line, EndMarker) {
+			continue
+		}
+		if disabled {
+			if !strings.HasPrefix(line, DisabledLinePrefix) {
+				lines[i] = DisabledLinePrefix + line
+			}
+		} else {
+			if strings.HasPrefix(line, DisabledLinePrefix) {
+				lines[i] = strings.TrimPrefix(line, DisabledLinePrefix)
+			}
+		}
+	}
+
+	rebuilt := append([]byte{}, prefix...)
+	rebuilt = append(rebuilt, []byte(strings.Join(lines, "\n"))...)
+	rebuilt = append(rebuilt, suffix...)
+
+	if string(rebuilt) == string(original) {
+		return false, nil
+	}
+	tmp := path + ".parel.tmp"
+	if err := os.WriteFile(tmp, rebuilt, 0o644); err != nil {
+		return false, err
+	}
+	return true, os.Rename(tmp, path)
+}
+
 // Inspect returns the current parel-managed block (without markers) or "".
 func Inspect(path string) (string, error) {
 	original, err := os.ReadFile(path)

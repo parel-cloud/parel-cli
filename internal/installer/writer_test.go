@@ -118,6 +118,76 @@ func TestRemove_DeletesBlockButKeepsRest(t *testing.T) {
 	}
 }
 
+func TestSetBlockDisabled_RoundTripIsByteFaithful(t *testing.T) {
+	p := freshFile(t, "alias unrelated='ls'\n")
+
+	opts := writeOpts()
+	opts.Snippet = "PAREL_MODEL_ID=\"qwen3-max\"\nclaude-parel() {\n  echo hi\n}"
+	if _, err := Apply(p, opts); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(p)
+
+	if changed, err := SetBlockDisabled(p, true); err != nil {
+		t.Fatalf("disable: %v", err)
+	} else if !changed {
+		t.Fatal("disable should report changed")
+	}
+
+	disabled, _ := os.ReadFile(p)
+	if !strings.Contains(string(disabled), DisabledLinePrefix+"PAREL_MODEL_ID=") {
+		t.Errorf("PAREL_MODEL_ID line was not commented out: %q", string(disabled))
+	}
+	if !strings.Contains(string(disabled), DisabledLinePrefix+"claude-parel()") {
+		t.Errorf("claude-parel function header was not commented: %q", string(disabled))
+	}
+	if !strings.Contains(string(disabled), BeginMarker) || !strings.Contains(string(disabled), EndMarker) {
+		t.Errorf("markers must survive disable: %q", string(disabled))
+	}
+	if !strings.Contains(string(disabled), "alias unrelated='ls'") {
+		t.Errorf("user content outside the block was disturbed: %q", string(disabled))
+	}
+
+	if changed, err := SetBlockDisabled(p, false); err != nil {
+		t.Fatalf("enable: %v", err)
+	} else if !changed {
+		t.Fatal("enable should report changed")
+	}
+
+	after, _ := os.ReadFile(p)
+	if string(after) != string(before) {
+		t.Errorf("round-trip not byte-faithful:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+	}
+}
+
+func TestSetBlockDisabled_NoOpWhenAlreadyInRequestedState(t *testing.T) {
+	p := freshFile(t, "")
+	if _, err := Apply(p, writeOpts()); err != nil {
+		t.Fatal(err)
+	}
+	// Already enabled (no prefix anywhere) → disable=false is a no-op.
+	changed, err := SetBlockDisabled(p, false)
+	if err != nil || changed {
+		t.Errorf("expected no-op enable on already-enabled file, got changed=%v err=%v", changed, err)
+	}
+	// Disable then disable again is also no-op.
+	if _, err := SetBlockDisabled(p, true); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = SetBlockDisabled(p, true)
+	if err != nil || changed {
+		t.Errorf("expected no-op disable on already-disabled file, got changed=%v err=%v", changed, err)
+	}
+}
+
+func TestSetBlockDisabled_NoBlockReturnsFalse(t *testing.T) {
+	p := freshFile(t, "alias x='echo'\n")
+	changed, err := SetBlockDisabled(p, true)
+	if err != nil || changed {
+		t.Errorf("expected no-op when no managed block exists, got changed=%v err=%v", changed, err)
+	}
+}
+
 func TestInspect_ReturnsCurrentBlock(t *testing.T) {
 	p := freshFile(t, "")
 	if _, err := Apply(p, writeOpts()); err != nil {

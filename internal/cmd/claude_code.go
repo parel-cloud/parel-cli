@@ -217,18 +217,31 @@ no shell restart needed.`,
 			return err
 		}
 
-		// Best-effort sanity check: if no installed block, the marker has nothing
-		// to gate. Tell the user, but still leave the marker — it's harmless.
+		// Comment out the managed block so a fresh shell doesn't define
+		// PAREL_* vars or the claude-parel function. Belt-and-suspenders with
+		// the marker: marker is instant for already-running shells, the
+		// commented block prevents new shells from re-introducing the env.
 		shell, shellErr := installer.DetectShell()
+		blockTouched := false
 		if shellErr == nil {
 			if block, _ := installer.Inspect(shell.Path); block == "" {
 				fmt.Fprintf(os.Stderr, "note: no parel claude-code block found in %s. Run `parel claude-code init` to install the launcher.\n", shell.Path)
-			} else if !strings.Contains(block, "claude-code.disabled") {
-				fmt.Fprintln(os.Stderr, "note: your installed snippet is older and does not check the disable marker. Run `parel claude-code init` to refresh.")
+			} else {
+				if !strings.Contains(block, "claude-code.disabled") {
+					fmt.Fprintln(os.Stderr, "note: your installed snippet is older and does not check the disable marker. Run `parel claude-code init` to refresh.")
+				}
+				if changed, err := installer.SetBlockDisabled(shell.Path, true); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not comment out the managed block in %s: %v\n", shell.Path, err)
+				} else {
+					blockTouched = changed
+				}
 			}
 		}
 
-		fmt.Fprintf(os.Stdout, "Disabled. claude-parel will pass through to plain `claude` until you run `parel claude-code enable`.\nMarker: %s\n", path)
+		fmt.Fprintf(os.Stdout, "Disabled. claude-parel falls through to plain `claude` immediately (marker: %s).\n", path)
+		if blockTouched {
+			fmt.Fprintf(os.Stdout, "The managed block in %s is now commented out. Run `source %s` (or open a new terminal) so plain `claude` no longer sees the Parel custom model.\n", shell.Path, shell.ProfileFmt)
+		}
 		return nil
 	},
 }
@@ -241,14 +254,39 @@ var claudeCodeEnableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		markerExisted := true
 		if err := os.Remove(path); err != nil {
 			if os.IsNotExist(err) {
-				fmt.Fprintln(os.Stdout, "Already enabled (no disable marker present).")
-				return nil
+				markerExisted = false
+			} else {
+				return err
 			}
-			return err
 		}
-		fmt.Fprintln(os.Stdout, "Enabled. claude-parel will route through Parel again.")
+
+		// Uncomment the managed block so a fresh shell re-defines PAREL_*
+		// vars and the claude-parel function.
+		shell, shellErr := installer.DetectShell()
+		blockTouched := false
+		if shellErr == nil {
+			if block, _ := installer.Inspect(shell.Path); block != "" {
+				if changed, err := installer.SetBlockDisabled(shell.Path, false); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not uncomment the managed block in %s: %v\n", shell.Path, err)
+				} else {
+					blockTouched = changed
+				}
+			}
+		}
+
+		switch {
+		case markerExisted && blockTouched:
+			fmt.Fprintf(os.Stdout, "Enabled. claude-parel routes through Parel again. Run `source %s` (or open a new terminal) so plain `claude` regains the Parel custom model.\n", shell.ProfileFmt)
+		case blockTouched:
+			fmt.Fprintf(os.Stdout, "Enabled. The managed block was re-activated. Run `source %s` (or open a new terminal) so plain `claude` regains the Parel custom model.\n", shell.ProfileFmt)
+		case markerExisted:
+			fmt.Fprintln(os.Stdout, "Enabled. claude-parel routes through Parel again.")
+		default:
+			fmt.Fprintln(os.Stdout, "Already enabled (no disable marker present).")
+		}
 		return nil
 	},
 }
